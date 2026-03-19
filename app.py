@@ -13,7 +13,7 @@ import geopandas as gpd
 import folium
 from folium.plugins import Draw
 from streamlit_folium import st_folium
-from shapely.geometry import shape, mapping
+from shapely.geometry import shape, mapping, Point, LineString, Polygon, MultiPolygon, MultiLineString, MultiPoint
 import os
 import tempfile
 import zipfile
@@ -26,19 +26,23 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak,
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import xml.etree.ElementTree as ET
+
 
 # ──────────────────────────────────────────────────────────────
 # Page Config
 # ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Valley Air Map Builder 1.0", page_icon="🗺️", layout="wide")
 
+
 # ──────────────────────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────────────────────
 TREATMENT_CATEGORIES = {
     "Forestry / Vegetation": [
-        "Timber Harvest", "Fuels Reduction", "Reforestation", "Prescribed Burn",
-        "Thinning", "Brush Clearing", "Habitat Restoration", "Other Forestry",
+        "Timber Harvest", "Fuels Reduction", "Reforestation",
+        "Prescribed Burn", "Thinning", "Brush Clearing",
+        "Habitat Restoration", "Other Forestry",
     ],
     "Agriculture": [
         "Crop Treatment", "Pesticide Application", "Irrigation Zone",
@@ -61,15 +65,14 @@ for cat, types in TREATMENT_CATEGORIES.items():
     for t in types:
         ALL_TREATMENT_TYPES.append(f"{cat} — {t}")
 
+
 # ──────────────────────────────────────────────────────────────
 # Session State
 # ──────────────────────────────────────────────────────────────
 if "features" not in st.session_state:
     st.session_state.features = []
-
 if "pending_drawing" not in st.session_state:
     st.session_state.pending_drawing = None
-
 # Page navigation: "draw", "list", "export"
 if "page" not in st.session_state:
     st.session_state.page = "draw"
@@ -78,11 +81,170 @@ if "page" not in st.session_state:
 # ──────────────────────────────────────────────────────────────
 # Helper Functions
 # ──────────────────────────────────────────────────────────────
+
+def extract_kml_from_kmz(kmz_bytes):
+    """Extract KML content from a KMZ (zipped KML) file.
+
+    Args:
+        kmz_bytes: bytes of the KMZ file
+
+    Returns:
+        KML content as bytes, or None if extraction fails
+    """
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            kmz_path = os.path.join(tmpdir, "temp.kmz")
+            with open(kmz_path, "wb") as f:
+                f.write(kmz_bytes)
+
+            with zipfile.ZipFile(kmz_path, "r") as zf:
+                kml_files = [f for f in zf.namelist() if f.lower().endswith(".kml")]
+                if not kml_files:
+                    return None
+                # Prefer doc.kml, otherwise use first KML file
+                kml_file = "doc.kml" if "doc.kml" in kml_files else kml_files[0]
+                return zf.read(kml_file)
+    except Exception:
+        return None
+
+
+def parse_kml_to_gdf(kml_content_bytes):
+    """Parse KML content and convert to GeoDataFrame.
+
+    Tries GDAL KML driver first (faster), then falls back to manual XML parsing.
+
+    Args:
+        kml_content_bytes: bytes of KML content
+
+    Returns:
+        GeoDataFrame with columns: geometry, name, category, treatment_type, status,
+                                   priority, area_acres, notes, date_created
+    """
+    gdf = None
+
+    # Try GDAL KML driver first (fastest)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            kml_path = os.path.join(tmpdir, "temp.kml")
+            with open(kml_path, "wb") as f:
+                f.write(kml_content_bytes)
+            gdf = gpd.read_file(kml_path, driver="KML")
+            if not gdf.empty:
+                gdf = gdf.to_crs(DEFAULT_CRS)
+                # Rename common KML columns if present
+                if "Name" in gdf.columns and "name" not in gdf.columns:
+                    gdf = gdf.rename(columns={"Name": "name"})
+                if "Description" in gdf.columns and "description" not in gdf.columns:
+                    gdf = gdf.rename(columns={"Description": "description"})
+                return gdf
+    except Exception:
+        pass
+
+    # Fallback: manual XML parsing
+    try:
+        root = ET.fromstring(kml_content_bytes)
+
+        # Handle KML namespace
+        ns = {"kml": "http://www.opengis.net/kml/2.2"}
+
+        rows = []
+
+        # Find all Placemarks
+        placemarks = root.findall(".//kml:Placemark", ns)
+        if not placemarks:
+            placemarks = root.findall(".//Placemark")
+
+        for pm in placemarks:
+            name_elem = pm.find("kml:name", ns)
+            if name_elem is None:
+                name_elem = pm.find("name")
+            name = name_elem.text if name_elem is not None and name_elem.text else "Untitled"
+
+            description_elem = pm.find("kml:description", ns)
+            if description_elem is None:
+                description_elem = pm.find("description")
+            description = description_elem.text if description_elem is not None and description_elem.text else ""
+
+            geom = None
+
+            # Try Point
+            point_elem = pm.find("kml:Point/kml:coordinates", ns)
+            if point_elem is None:
+                point_elem = pm.find("Point/coordinates")
+            if point_elem is not None and point_elem.text:
+                try:
+                    coords = point_elem.text.strip().split(",")
+                    if len(coords) >= 2:
+                        geom = Point(float(coords[0]), float(coords[1]))
+                except Exception:
+                    pass
+
+            # Try LineString
+            if geom is None:
+                line_elem = pm.find("kml:LineString/kml:coordinates", ns)
+                if line_elem is None:
+                    line_elem = pm.find("LineString/coordinates")
+                if line_elem is not None and line_elem.text:
+                    try:
+                        coords_list = []
+                        for coord_str in line_elem.text.strip().split():
+                            parts = coord_str.split(",")
+                            if len(parts) >= 2:
+                                coords_list.append((float(parts[0]), float(parts[1])))
+                        if len(coords_list) >= 2:
+                            geom = LineString(coords_list)
+                    except Exception:
+                        pass
+
+            # Try Polygon
+            if geom is None:
+                poly_elem = pm.find("kml:Polygon/kml:outerBoundaryIs/kml:LinearRing/kml:coordinates", ns)
+                if poly_elem is None:
+                    poly_elem = pm.find("Polygon/outerBoundaryIs/LinearRing/coordinates")
+                if poly_elem is not None and poly_elem.text:
+                    try:
+                        coords_list = []
+                        for coord_str in poly_elem.text.strip().split():
+                            parts = coord_str.split(",")
+                            if len(parts) >= 2:
+                                coords_list.append((float(parts[0]), float(parts[1])))
+                        if len(coords_list) >= 3:
+                            geom = Polygon(coords_list)
+                    except Exception:
+                        pass
+
+            if geom is not None and not geom.is_empty:
+                rows.append({
+                    "geometry": geom,
+                    "name": name,
+                    "category": "Other",
+                    "treatment_type": "General Treatment",
+                    "status": "Planned",
+                    "priority": "Medium",
+                    "area_acres": 0,
+                    "notes": description,
+                    "date_created": datetime.now().strftime("%Y-%m-%d"),
+                })
+
+        if rows:
+            gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=DEFAULT_CRS)
+            return gdf
+    except Exception:
+        pass
+
+    # Return empty GeoDataFrame if parsing failed
+    return gpd.GeoDataFrame(
+        columns=["geometry", "name", "category", "treatment_type",
+                 "status", "priority", "area_acres", "notes", "date_created"],
+        geometry="geometry", crs=DEFAULT_CRS,
+    )
+
+
 def features_to_gdf(features):
     if not features:
         return gpd.GeoDataFrame(
             columns=["geometry", "name", "category", "treatment_type",
-                      "status", "priority", "area_acres", "notes", "date_created"],
+                     "status", "priority", "area_acres", "notes", "date_created"],
             geometry="geometry", crs=DEFAULT_CRS,
         )
     rows = []
@@ -140,9 +302,9 @@ def render_map_image(gdf):
 
     cat_colors = {
         "Forestry / Vegetation": "#22cc22",
-        "Agriculture": "#ddaa00",
+        "Agriculture":           "#ddaa00",
         "Environmental Cleanup": "#4488ff",
-        "Other": "#aaaaaa",
+        "Other":                 "#aaaaaa",
     }
 
     fig, ax = plt.subplots(1, 1, figsize=(14, 8))
@@ -151,14 +313,14 @@ def render_map_image(gdf):
     for cat, color in cat_colors.items():
         subset = gdf_3857[gdf_3857["category"] == cat]
         if len(subset) > 0:
-            subset.plot(ax=ax, color=color, edgecolor="white", linewidth=1.5,
-                        alpha=0.55, label=cat)
+            subset.plot(ax=ax, color=color, edgecolor="white",
+                        linewidth=1.5, alpha=0.55, label=cat)
 
     # Anything not matching known categories
     other = gdf_3857[~gdf_3857["category"].isin(cat_colors.keys())]
     if len(other) > 0:
-        other.plot(ax=ax, color="#aaaaaa", edgecolor="white", linewidth=1.5,
-                   alpha=0.55, label="Other")
+        other.plot(ax=ax, color="#aaaaaa", edgecolor="white",
+                   linewidth=1.5, alpha=0.55, label="Other")
 
     # Add labels at polygon centroids
     for _, row in gdf_3857.iterrows():
@@ -169,8 +331,7 @@ def render_map_image(gdf):
             f"{name}\n{acres:,.1f} ac",
             xy=(centroid.x, centroid.y),
             ha="center", va="center",
-            fontsize=7, fontweight="bold",
-            color="white",
+            fontsize=7, fontweight="bold", color="white",
             path_effects=[
                 matplotlib.patheffects.withStroke(linewidth=2, foreground="black")
             ],
@@ -191,7 +352,6 @@ def render_map_image(gdf):
     dy = (ymax - ymin) * 0.15 or 5000
     ax.set_xlim(xmin - dx, xmax + dx)
     ax.set_ylim(ymin - dy, ymax + dy)
-
     ax.set_axis_off()
 
     # Build manual legend (GeoDataFrame.plot doesn't auto-create legend handles)
@@ -204,7 +364,6 @@ def render_map_image(gdf):
         ax.legend(handles=legend_handles, loc="lower left", fontsize=8, framealpha=0.85)
 
     ax.set_title("Treatment Area Overview", fontsize=12, fontweight="bold", pad=10)
-
     plt.tight_layout()
 
     # Save to bytes
@@ -225,8 +384,7 @@ def export_pdf(gdf, filename="treatment_areas"):
     story = []
 
     # ── Page 1: Title + Map ──
-    title_style = ParagraphStyle("Title2", parent=styles["Title"], fontSize=20,
-                                  spaceAfter=4)
+    title_style = ParagraphStyle("Title2", parent=styles["Title"], fontSize=20, spaceAfter=4)
     story.append(Paragraph("Valley Air Map Builder — Treatment Area Report", title_style))
 
     total_acres = gdf["area_acres"].sum() if "area_acres" in gdf.columns else 0
@@ -249,8 +407,7 @@ def export_pdf(gdf, filename="treatment_areas"):
         story.append(img)
     except Exception as e:
         story.append(Paragraph(
-            f"<i>Could not render map image: {e}</i>",
-            styles["Normal"],
+            f"<i>Could not render map image: {e}</i>", styles["Normal"],
         ))
 
     story.append(Spacer(1, 6))
@@ -262,7 +419,6 @@ def export_pdf(gdf, filename="treatment_areas"):
         c = row.get("category", "Other")
         cat_counts[c] = cat_counts.get(c, 0) + 1
         cat_acres[c] = cat_acres.get(c, 0) + row.get("area_acres", 0)
-
     summary_parts = []
     for cat in ["Forestry / Vegetation", "Agriculture", "Environmental Cleanup", "Other"]:
         if cat in cat_counts:
@@ -277,7 +433,6 @@ def export_pdf(gdf, filename="treatment_areas"):
 
     header = ["Name", "Category", "Treatment Type", "Status", "Priority", "Acres", "Date", "Notes"]
     table_data = [header]
-
     for _, row in gdf.iterrows():
         notes_text = str(row.get("notes", ""))[:80]
         if len(str(row.get("notes", ""))) > 80:
@@ -354,15 +509,15 @@ with st.sidebar:
     st.header("Valley Air Map Builder 1.0")
 
     st.subheader("Navigation")
-    if st.button("🗺️  Draw on Map", use_container_width=True,
+    if st.button("🗺️ Draw on Map", use_container_width=True,
                  type="primary" if st.session_state.page == "draw" else "secondary"):
         st.session_state.page = "draw"
         st.rerun()
-    if st.button("📋  View / Edit Data", use_container_width=True,
+    if st.button("📋 View / Edit Data", use_container_width=True,
                  type="primary" if st.session_state.page == "list" else "secondary"):
         st.session_state.page = "list"
         st.rerun()
-    if st.button("📤  Export", use_container_width=True,
+    if st.button("📤 Export", use_container_width=True,
                  type="primary" if st.session_state.page == "export" else "secondary"):
         st.session_state.page = "export"
         st.rerun()
@@ -372,14 +527,27 @@ with st.sidebar:
     # Upload
     st.subheader("📂 Import Data")
     uploaded_file = st.file_uploader(
-        "Upload zipped shapefile or GeoJSON",
-        type=["zip", "geojson", "json"],
+        "Upload zipped shapefile, GeoJSON, KML, or KMZ",
+        type=["zip", "geojson", "json", "kml", "kmz"],
         key="file_upload",
     )
+
     if uploaded_file is not None:
         if st.button("Import", type="primary"):
             try:
-                if uploaded_file.name.endswith(".zip"):
+                gdf = None
+
+                if uploaded_file.name.endswith(".kmz"):
+                    # Extract KML from KMZ and parse
+                    kml_content = extract_kml_from_kmz(uploaded_file.read())
+                    if kml_content:
+                        gdf = parse_kml_to_gdf(kml_content)
+                    else:
+                        st.error("Could not extract KML from KMZ file.")
+                elif uploaded_file.name.endswith(".kml"):
+                    # Parse KML directly
+                    gdf = parse_kml_to_gdf(uploaded_file.read())
+                elif uploaded_file.name.endswith(".zip"):
                     with tempfile.TemporaryDirectory() as tmpdir:
                         zip_path = os.path.join(tmpdir, "upload.zip")
                         with open(zip_path, "wb") as f:
@@ -396,29 +564,32 @@ with st.sidebar:
                     gdf = gpd.read_file(uploaded_file)
                     gdf = gdf.to_crs(DEFAULT_CRS)
 
-                count = 0
-                for _, row in gdf.iterrows():
-                    geom = row.geometry
-                    if geom is None or geom.is_empty:
-                        continue
-                    area = calc_area_acres(geom)
-                    feature = {
-                        "geometry": mapping(geom),
-                        "properties": {
-                            "name": str(row.get("name", row.get("NAME", f"Imported_{count+1}"))),
-                            "category": str(row.get("category", row.get("CATEGORY", "Other"))),
-                            "treatment_type": str(row.get("treatment_", row.get("treatment_type", "General Treatment"))),
-                            "status": str(row.get("status", row.get("STATUS", "Planned"))),
-                            "priority": str(row.get("priority", row.get("PRIORITY", "Medium"))),
-                            "area_acres": area,
-                            "notes": str(row.get("notes", row.get("NOTES", ""))),
-                            "date_created": datetime.now().strftime("%Y-%m-%d"),
-                        },
-                    }
-                    st.session_state.features.append(feature)
-                    count += 1
-                st.success(f"Imported {count} features!")
-                st.rerun()
+                if gdf is not None and not gdf.empty:
+                    count = 0
+                    for _, row in gdf.iterrows():
+                        geom = row.geometry
+                        if geom is None or geom.is_empty:
+                            continue
+                        area = calc_area_acres(geom)
+                        feature = {
+                            "geometry": mapping(geom),
+                            "properties": {
+                                "name": str(row.get("name", row.get("NAME", f"Imported_{count+1}"))),
+                                "category": str(row.get("category", row.get("CATEGORY", "Other"))),
+                                "treatment_type": str(row.get("treatment_", row.get("treatment_type", "General Treatment"))),
+                                "status": str(row.get("status", row.get("STATUS", "Planned"))),
+                                "priority": str(row.get("priority", row.get("PRIORITY", "Medium"))),
+                                "area_acres": area,
+                                "notes": str(row.get("notes", row.get("NOTES", ""))),
+                                "date_created": datetime.now().strftime("%Y-%m-%d"),
+                            },
+                        }
+                        st.session_state.features.append(feature)
+                        count += 1
+                    st.success(f"Imported {count} features!")
+                    st.rerun()
+                else:
+                    st.error("No features found in the uploaded file.")
             except Exception as e:
                 st.error(f"Import error: {e}")
 
@@ -430,7 +601,8 @@ with st.sidebar:
     st.metric("Treatment Areas", n)
     if n > 0:
         total_acres = sum(
-            f.get("properties", {}).get("area_acres", 0) for f in st.session_state.features
+            f.get("properties", {}).get("area_acres", 0)
+            for f in st.session_state.features
         )
         st.metric("Total Acreage", f"{total_acres:,.2f} ac")
 
@@ -445,7 +617,6 @@ with st.sidebar:
 # PAGE: Draw on Map
 # ══════════════════════════════════════════════════════════════
 if st.session_state.page == "draw":
-
     st.title("🗺️ Draw Treatment Areas")
 
     # ── STEP 1: The Map ──
@@ -458,11 +629,10 @@ if st.session_state.page == "draw":
         horizontal=True,
         key="base_map",
     )
-
     tile_options = {
-        "Terrain": ("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "OpenTopoMap"),
+        "Terrain":   ("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", "OpenTopoMap"),
         "Satellite": ("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", "Esri"),
-        "Street": ("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", "OpenStreetMap"),
+        "Street":    ("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", "OpenStreetMap"),
     }
     tile_url, tile_attr = tile_options[base_map]
 
@@ -489,9 +659,13 @@ if st.session_state.page == "draw":
     Draw(
         export=False,
         draw_options={
-            "polyline": False, "circle": False, "circlemarker": False, "marker": False,
+            "polyline": False,
+            "circle": False,
+            "circlemarker": False,
+            "marker": False,
             "polygon": {
-                "allowIntersection": False, "showArea": True,
+                "allowIntersection": False,
+                "showArea": True,
                 "shapeOptions": {"color": "#ff6600", "weight": 3, "fillOpacity": 0.3},
             },
             "rectangle": {
@@ -513,7 +687,6 @@ if st.session_state.page == "draw":
     # ── STEP 2: Attributes ──
     st.divider()
     pending = st.session_state.pending_drawing
-
     if pending:
         try:
             geom_preview = shape(pending["geometry"])
@@ -524,7 +697,6 @@ if st.session_state.page == "draw":
         st.markdown(f"**Step 2:** Shape captured! **{area_preview:,.2f} acres** — fill in details below.")
 
         col1, col2, col3 = st.columns(3)
-
         with col1:
             name = st.text_input("Name *", placeholder="e.g. Unit 42 - North Ridge", key="draw_name")
             treatment_sel = st.selectbox(
@@ -532,16 +704,13 @@ if st.session_state.page == "draw":
                 ALL_TREATMENT_TYPES,
                 key="draw_treatment",
             )
-
         with col2:
             status = st.selectbox("Status", ["Planned", "In Progress", "Completed", "On Hold", "Cancelled"], key="draw_status")
             priority = st.selectbox("Priority", ["Low", "Medium", "High", "Critical"], key="draw_priority")
-
         with col3:
             notes = st.text_area("Notes", placeholder="Additional details...", key="draw_notes", height=120)
 
         col_save, col_discard, _ = st.columns([1, 1, 3])
-
         with col_save:
             if st.button("Save Treatment Area", type="primary", use_container_width=True):
                 if not name or not name.strip():
@@ -566,7 +735,6 @@ if st.session_state.page == "draw":
                     st.session_state.features.append(feature)
                     st.session_state.pending_drawing = None
                     st.success(f"Saved '{name.strip()}' — {area_acres:,.2f} acres!")
-
         with col_discard:
             if st.button("Discard Drawing", use_container_width=True):
                 st.session_state.pending_drawing = None
@@ -589,7 +757,6 @@ if st.session_state.page == "draw":
 # PAGE: View / Edit Data
 # ══════════════════════════════════════════════════════════════
 elif st.session_state.page == "list":
-
     st.title("📋 Treatment Areas")
 
     if not st.session_state.features:
@@ -625,16 +792,18 @@ elif st.session_state.page == "list":
                     pri_idx = priorities.index(cur_pri) if cur_pri in priorities else 1
                     new_priority = st.selectbox("Priority", priorities, index=pri_idx, key=f"pri_{i}")
                     st.metric("Area", f"{props.get('area_acres', 0):,.2f} ac")
-
                 new_notes = st.text_area("Notes", value=props.get("notes", ""), key=f"notes_{i}")
 
                 col_save, col_del = st.columns(2)
                 with col_save:
                     if st.button("Save Changes", key=f"save_{i}"):
                         st.session_state.features[i]["properties"].update({
-                            "name": new_name, "category": new_cat,
-                            "treatment_type": new_type, "status": new_status,
-                            "priority": new_priority, "notes": new_notes,
+                            "name": new_name,
+                            "category": new_cat,
+                            "treatment_type": new_type,
+                            "status": new_status,
+                            "priority": new_priority,
+                            "notes": new_notes,
                         })
                         st.success("Saved!")
                         st.rerun()
@@ -648,7 +817,6 @@ elif st.session_state.page == "list":
 # PAGE: Export
 # ══════════════════════════════════════════════════════════════
 elif st.session_state.page == "export":
-
     st.title("📤 Export Treatment Areas")
 
     if not st.session_state.features:
@@ -658,7 +826,6 @@ elif st.session_state.page == "export":
 
         with col_opts:
             export_name = st.text_input("Filename", value="treatment_areas", key="export_name")
-
             export_crs = st.selectbox("Coordinate Reference System", [
                 "EPSG:4326 (WGS 84 — Lat/Lon)",
                 "EPSG:5070 (NAD83 Conus Albers)",
@@ -671,14 +838,17 @@ elif st.session_state.page == "export":
             crs_code = export_crs.split(" ")[0]
 
             export_format = st.selectbox("Format", [
-                "Shapefile (.shp — zipped)", "GeoJSON (.geojson)",
+                "Shapefile (.shp — zipped)",
+                "GeoJSON (.geojson)",
                 "PDF Report (.pdf)"
             ], key="export_format")
 
             st.caption("**Optional Filters**")
-            filter_cats = st.multiselect("Filter by Category", list(TREATMENT_CATEGORIES.keys()), key="filter_cats")
+            filter_cats = st.multiselect("Filter by Category",
+                                         list(TREATMENT_CATEGORIES.keys()), key="filter_cats")
             filter_status = st.multiselect("Filter by Status",
-                ["Planned", "In Progress", "Completed", "On Hold", "Cancelled"], key="filter_status")
+                                           ["Planned", "In Progress", "Completed", "On Hold", "Cancelled"],
+                                           key="filter_status")
 
         with col_preview:
             gdf = features_to_gdf(st.session_state.features)
@@ -693,7 +863,6 @@ elif st.session_state.page == "export":
                 gdf_export = gdf.copy()
 
             st.caption(f"**Preview** — {len(gdf_export)} features")
-
             if len(gdf_export) > 0:
                 preview_df = gdf_export.drop(columns=["geometry"]).copy()
                 st.dataframe(preview_df, use_container_width=True, height=300)
@@ -702,23 +871,33 @@ elif st.session_state.page == "export":
                 if "Shapefile" in export_format:
                     shp_buf = export_shapefile(gdf_export, filename=export_name)
                     st.download_button(
-                        "Download Shapefile (.zip)", data=shp_buf,
-                        file_name=f"{export_name}.zip", mime="application/zip", type="primary",
+                        "Download Shapefile (.zip)",
+                        data=shp_buf,
+                        file_name=f"{export_name}.zip",
+                        mime="application/zip",
+                        type="primary",
                     )
                 elif "GeoJSON" in export_format:
                     geojson_str = gdf_export.to_json()
                     st.download_button(
-                        "Download GeoJSON", data=geojson_str,
-                        file_name=f"{export_name}.geojson", mime="application/json", type="primary",
+                        "Download GeoJSON",
+                        data=geojson_str,
+                        file_name=f"{export_name}.geojson",
+                        mime="application/json",
+                        type="primary",
                     )
                 elif "PDF" in export_format:
                     pdf_buf = export_pdf(gdf_export, filename=export_name)
                     st.download_button(
-                        "Download PDF Report", data=pdf_buf,
-                        file_name=f"{export_name}.pdf", mime="application/pdf", type="primary",
+                        "Download PDF Report",
+                        data=pdf_buf,
+                        file_name=f"{export_name}.pdf",
+                        mime="application/pdf",
+                        type="primary",
                     )
             else:
                 st.warning("No features match the current filters.")
+
 
 # Footer
 st.divider()
