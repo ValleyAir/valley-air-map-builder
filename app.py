@@ -308,7 +308,7 @@ def render_map_image(gdf):
         "Other":                 "#aaaaaa",
     }
 
-    fig, ax = plt.subplots(1, 1, figsize=(14, 8))
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
     # Draw each polygon colored by category
     for cat, color in cat_colors.items():
@@ -364,7 +364,6 @@ def render_map_image(gdf):
     if legend_handles:
         ax.legend(handles=legend_handles, loc="lower left", fontsize=8, framealpha=0.85)
 
-    ax.set_title("Treatment Area Overview", fontsize=12, fontweight="bold", pad=10)
     plt.tight_layout()
 
     # Save to bytes
@@ -408,7 +407,7 @@ def export_pdf(gdf, filename="treatment_areas"):
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             tmp.write(map_img_buf.getvalue())
             map_tmp_path = tmp.name
-        img = Image(map_tmp_path, width=7.5*inch, height=5.5*inch)
+        img = Image(map_tmp_path, width=7.5*inch, height=6.0*inch)
         story.append(img)
     except Exception as e:
         story.append(Paragraph(
