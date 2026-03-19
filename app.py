@@ -375,7 +375,7 @@ def render_map_image(gdf):
 
 
 def export_pdf(gdf, filename="treatment_areas"):
-    """Generate a PDF report with a map overview image and treatment area data table."""
+    """Generate a PDF report with a map overview image, work order form, and treatment area data table."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(letter),
                             topMargin=0.5*inch, bottomMargin=0.5*inch,
@@ -426,7 +426,12 @@ def export_pdf(gdf, filename="treatment_areas"):
     if summary_parts:
         story.append(Paragraph(" &nbsp;&nbsp;|&nbsp;&nbsp; ".join(summary_parts), styles["Normal"]))
 
-    # ── Page 2: Data Table ──
+    # ── Page 2: Work Order Form ──
+    story.append(PageBreak())
+    work_order_elements = build_work_order_page(gdf, styles)
+    story.extend(work_order_elements)
+
+    # ── Page 3: Data Table ──
     story.append(PageBreak())
     story.append(Paragraph("Treatment Area Details", styles["Heading1"]))
     story.append(Spacer(1, 8))
@@ -500,6 +505,287 @@ def parse_treatment_selection(selection):
         parts = selection.split(" — ", 1)
         return parts[0], parts[1]
     return "Other", selection
+
+
+def build_work_order_page(gdf, styles):
+    """
+    Build a professional work order form page for Valley Air LLC.
+
+    Args:
+        gdf: GeoDataFrame with location data containing 'name', 'area_acres', 'category' columns
+        styles: reportlab style sheet from getSampleStyleSheet()
+
+    Returns:
+        list of reportlab story elements (Paragraphs, Tables, Spacers, etc.)
+    """
+    story = []
+
+    # Custom styles
+    header_style = ParagraphStyle(
+        'WorkOrderHeader',
+        parent=styles['Heading1'],
+        fontSize=18,
+        textColor=colors.HexColor('#2c3e50'),
+        spaceAfter=6,
+        alignment=1  # center
+    )
+
+    small_bold = ParagraphStyle(
+        'SmallBold',
+        parent=styles['Normal'],
+        fontSize=7,
+        textColor=colors.black,
+        fontName='Helvetica-Bold',
+        spaceAfter=1
+    )
+
+    current_date = datetime.now().strftime("%m/%d/%Y")
+
+    # ===== HEADER SECTION =====
+    story.append(Paragraph("Valley Air LLC — Work Order", header_style))
+    story.append(Spacer(1, 0.15*inch))
+
+    # Header row: Job #, Status, Date
+    header_data = [
+        ['Job #: ________________', 'Status: ________________', f'Date: {current_date}']
+    ]
+    header_table = Table(header_data, colWidths=[2.2*inch, 2.2*inch, 1.8*inch])
+    header_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('LINEBELOW', (0, 0), (0, 0), 0.5, colors.black),
+        ('LINEBELOW', (1, 0), (1, 0), 0.5, colors.black),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 0.15*inch))
+
+    # ===== SCHEDULING SECTION =====
+    story.append(Paragraph("SCHEDULING", small_bold))
+    scheduling_data = [[
+        'Call Date\n_________',
+        'Date Proposed\n_________',
+        'Time Proposed\n_________',
+        'Schedule Date\n_________',
+        'Date Expires\n_________',
+        'Consultant\n_________'
+    ]]
+    scheduling_table = Table(scheduling_data, colWidths=[0.9*inch, 0.9*inch, 0.9*inch, 0.9*inch, 0.9*inch, 1.0*inch])
+    scheduling_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+        ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.black),
+    ]))
+    story.append(scheduling_table)
+    story.append(Spacer(1, 0.12*inch))
+
+    # ===== LOCATIONS TABLE =====
+    story.append(Paragraph("LOCATIONS", small_bold))
+
+    # Build locations table
+    locations_data = [['Map #', 'Location/Customer', 'Acres', 'Planted', 'Applied', 'Wind', 'Crop', 'Strip', 'Pests']]
+    total_acres = 0.0
+
+    for idx, row in gdf.iterrows():
+        map_num = idx + 1
+        location_name = row.get('name', '')
+        acres = row.get('area_acres', 0.0)
+        crop = row.get('category', '')
+
+        total_acres += acres
+
+        locations_data.append([
+            str(map_num),
+            location_name[:15],  # truncate for space
+            f"{acres:.2f}",
+            '_____',
+            '_____',
+            '_____',
+            crop[:8],  # truncate
+            '_____',
+            '_____'
+        ])
+
+    # Add total row
+    locations_data.append([
+        '',
+        '',
+        f'Total Applied Acres: {total_acres:.2f}',
+        '',
+        '',
+        '',
+        '',
+        '',
+        ''
+    ])
+
+    locations_table = Table(locations_data, colWidths=[0.45*inch, 1.1*inch, 0.55*inch, 0.50*inch, 0.55*inch, 0.45*inch, 0.55*inch, 0.50*inch, 0.55*inch])
+
+    # Style locations table
+    header_fill = colors.HexColor('#2c3e50')
+    locations_table.setStyle(TableStyle([
+        # Header row
+        ('BACKGROUND', (0, 0), (-1, 0), header_fill),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 7),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+
+        # Data rows
+        ('FONT', (0, 1), (-1, -2), 'Helvetica', 7),
+        ('ALIGN', (0, 1), (-1, -2), 'CENTER'),
+        ('VALIGN', (0, 1), (-1, -2), 'MIDDLE'),
+        ('TOPPADDING', (0, 1), (-1, -2), 3),
+        ('BOTTOMPADDING', (0, 1), (-1, -2), 3),
+
+        # Alternating row backgrounds
+        ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#f0f0f0')]),
+
+        # Total row
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8e8e8')),
+        ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 7),
+        ('ALIGN', (0, -1), (-1, -1), 'CENTER'),
+        ('TOPPADDING', (0, -1), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, -1), (-1, -1), 3),
+
+        # Grid lines
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+    ]))
+    story.append(locations_table)
+    story.append(Spacer(1, 0.10*inch))
+
+    # ===== CHEMICALS / CHARGES TABLE =====
+    story.append(Paragraph("CHEMICALS / CHARGES", small_bold))
+
+    chemicals_data = [['Chemical/Charge', 'Vendor', 'Rate/ac', 'UM', 'Total Applied']]
+    for _ in range(4):
+        chemicals_data.append(['_____________', '_________', '_____', '_____', '__________'])
+
+    chemicals_table = Table(chemicals_data, colWidths=[2.0*inch, 1.4*inch, 0.9*inch, 0.7*inch, 1.0*inch])
+    chemicals_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), header_fill),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 7),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+
+        ('FONT', (0, 1), (-1, -1), 'Helvetica', 7),
+        ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 1), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 3),
+
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')]),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+    ]))
+    story.append(chemicals_table)
+
+    # Chemicals footer info
+    chem_footer_data = [['Diluent Rate: ___________', 'Hours Reentry: ___________', 'Days Preharvest: ___________']]
+    chem_footer_table = Table(chem_footer_data, colWidths=[2.2*inch, 2.2*inch, 2.2*inch])
+    chem_footer_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(chem_footer_table)
+    story.append(Spacer(1, 0.10*inch))
+
+    # ===== LOADER WORKSHEET SECTION =====
+    story.append(Paragraph("LOADER WORKSHEET", small_bold))
+
+    loader_row1_data = [['Select Applicator: ___________', 'Vehicle: ___________', 'Vehicle Capacity: ___________', 'Rate: _____', 'GL: ______']]
+    loader_row1_table = Table(loader_row1_data, colWidths=[1.2*inch, 1.1*inch, 1.3*inch, 0.8*inch, 0.8*inch])
+    loader_row1_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(loader_row1_table)
+
+    loader_row2_data = [['Acre: _____', f'Total Job Acres: {total_acres:.2f}', 'Loads: _____', '', '']]
+    loader_row2_table = Table(loader_row2_data, colWidths=[1.2*inch, 1.1*inch, 1.3*inch, 0.8*inch, 0.8*inch])
+    loader_row2_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(loader_row2_table)
+    story.append(Spacer(1, 0.10*inch))
+
+    # ===== APPLIED INFO SECTION =====
+    story.append(Paragraph("APPLIED INFO", small_bold))
+
+    applied_row1_data = [['Applicator: ___________', 'Vehicle: ___________', 'Application Date: ___________']]
+    applied_row1_table = Table(applied_row1_data, colWidths=[1.8*inch, 1.8*inch, 2.0*inch])
+    applied_row1_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(applied_row1_table)
+
+    applied_row2_data = [['Beg. Tach: _____', 'End Tach: _____', 'Net Tach: _____', 'Flights: _____', 'Starts: _____']]
+    applied_row2_table = Table(applied_row2_data, colWidths=[1.4*inch, 1.4*inch, 1.4*inch, 1.0*inch, 1.0*inch])
+    applied_row2_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(applied_row2_table)
+    story.append(Spacer(1, 0.08*inch))
+
+    # Weather sub-section
+    story.append(Paragraph("WEATHER", small_bold))
+
+    weather_row1_data = [['Start Time: _____', 'Start Temp (°F): _____', 'Start Wind Dir: _____', 'Start Wind mph: _____', 'Start Humidity: _____']]
+    weather_row1_table = Table(weather_row1_data, colWidths=[1.0*inch, 1.2*inch, 1.1*inch, 1.1*inch, 1.2*inch])
+    weather_row1_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(weather_row1_table)
+
+    weather_row2_data = [['End Time: _____', 'End Temp (°F): _____', 'End Wind Dir: _____', 'End Wind mph: _____', 'End Humidity: _____']]
+    weather_row2_table = Table(weather_row2_data, colWidths=[1.0*inch, 1.2*inch, 1.1*inch, 1.1*inch, 1.2*inch])
+    weather_row2_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(weather_row2_table)
+
+    applied_row3_data = [['Total Time: ___________']]
+    applied_row3_table = Table(applied_row3_data, colWidths=[6.0*inch])
+    applied_row3_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(applied_row3_table)
+    story.append(Spacer(1, 0.08*inch))
+
+    # Comments section
+    story.append(Paragraph("COMMENTS:", small_bold))
+    comment_data = [['_' * 120]]
+    comment_table = Table(comment_data, colWidths=[5.8*inch])
+    comment_table.setStyle(TableStyle([
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('LEFTPADDING', (0, 0), (-1, -1), 3),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('HEIGHT', (0, 0), (-1, -1), 0.5*inch),
+    ]))
+    story.append(comment_table)
+
+    return story
 
 
 # ──────────────────────────────────────────────────────────────
