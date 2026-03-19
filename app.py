@@ -400,14 +400,34 @@ def export_pdf(gdf, filename="treatment_areas"):
     ))
     story.append(Spacer(1, 10))
 
-    # Render map image — keep temp file alive until after doc.build()
+    # Render map image — scale proportionally to fit portrait page
     map_tmp_path = None
     try:
         map_img_buf = render_map_image(gdf)
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
             tmp.write(map_img_buf.getvalue())
             map_tmp_path = tmp.name
-        img = Image(map_tmp_path, width=7.5*inch, height=6.0*inch)
+
+        # Read actual image dimensions to preserve aspect ratio
+        from PIL import Image as PILImage
+        with PILImage.open(map_tmp_path) as pil_img:
+            img_w, img_h = pil_img.size
+
+        max_w = 7.5 * inch
+        max_h = 7.0 * inch  # leave room for title + summary text
+        aspect = img_w / img_h
+
+        # Scale to fit within max_w x max_h while preserving aspect ratio
+        if aspect >= (max_w / max_h):
+            # Image is wider than box — fit to width
+            pdf_w = max_w
+            pdf_h = max_w / aspect
+        else:
+            # Image is taller than box — fit to height
+            pdf_h = max_h
+            pdf_w = max_h * aspect
+
+        img = Image(map_tmp_path, width=pdf_w, height=pdf_h)
         story.append(img)
     except Exception as e:
         story.append(Paragraph(
