@@ -23,7 +23,8 @@ from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak,
+    BaseDocTemplate, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    Image, PageBreak, Frame, PageTemplate, NextPageTemplate,
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import xml.etree.ElementTree as ET
@@ -377,13 +378,29 @@ def render_map_image(gdf):
 def export_pdf(gdf, filename="treatment_areas"):
     """Generate a PDF report with a map overview image, work order form, and treatment area data table."""
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(letter),
-                            topMargin=0.5*inch, bottomMargin=0.5*inch,
-                            leftMargin=0.5*inch, rightMargin=0.5*inch)
+    margin = 0.5 * inch
+
+    # Use BaseDocTemplate with two page templates: landscape and portrait
+    doc = BaseDocTemplate(buf, pagesize=landscape(letter),
+                          topMargin=margin, bottomMargin=margin,
+                          leftMargin=margin, rightMargin=margin)
+
+    # Landscape frame (11 x 8.5)
+    lw, lh = landscape(letter)
+    landscape_frame = Frame(margin, margin, lw - 2*margin, lh - 2*margin, id='landscape')
+    landscape_template = PageTemplate(id='landscape', frames=[landscape_frame], pagesize=landscape(letter))
+
+    # Portrait frame (8.5 x 11)
+    pw, ph = letter
+    portrait_frame = Frame(margin, margin, pw - 2*margin, ph - 2*margin, id='portrait')
+    portrait_template = PageTemplate(id='portrait', frames=[portrait_frame], pagesize=letter)
+
+    doc.addPageTemplates([landscape_template, portrait_template])
+
     styles = getSampleStyleSheet()
     story = []
 
-    # ── Page 1: Title + Map ──
+    # ── Page 1: Title + Map (landscape) ──
     title_style = ParagraphStyle("Title2", parent=styles["Title"], fontSize=20, spaceAfter=4)
     story.append(Paragraph("Valley Air Map Builder — Treatment Area Report", title_style))
 
@@ -426,12 +443,14 @@ def export_pdf(gdf, filename="treatment_areas"):
     if summary_parts:
         story.append(Paragraph(" &nbsp;&nbsp;|&nbsp;&nbsp; ".join(summary_parts), styles["Normal"]))
 
-    # ── Page 2: Work Order Form ──
+    # ── Page 2: Work Order Form (switch to portrait) ──
+    story.append(NextPageTemplate('portrait'))
     story.append(PageBreak())
     work_order_elements = build_work_order_page(gdf, styles)
     story.extend(work_order_elements)
 
-    # ── Page 3: Data Table ──
+    # ── Page 3: Data Table (switch back to landscape) ──
+    story.append(NextPageTemplate('landscape'))
     story.append(PageBreak())
     story.append(Paragraph("Treatment Area Details", styles["Heading1"]))
     story.append(Spacer(1, 8))
@@ -510,7 +529,7 @@ def parse_treatment_selection(selection):
 def build_work_order_page(gdf, styles):
     """
     Build a professional work order form page for Valley Air LLC.
-    Uses full landscape page width (10" usable) with generous spacing for handwriting.
+    Uses portrait page width (7.5" usable) with generous spacing for handwriting.
 
     Args:
         gdf: GeoDataFrame with location data containing 'name', 'area_acres', 'category' columns
@@ -551,7 +570,7 @@ def build_work_order_page(gdf, styles):
     )
 
     current_date = datetime.now().strftime("%m/%d/%Y")
-    full_width = 10.0 * inch
+    full_width = 7.5 * inch  # Portrait letter: 8.5" - 2*0.5" margins
 
     # ===== HEADER SECTION =====
     story.append(Paragraph("Valley Air LLC — Work Order", header_style))
@@ -881,7 +900,7 @@ def build_work_order_page(gdf, styles):
     story.append(Spacer(1, 0.10*inch))
 
     applied_row3_data = [['Total Time: ____________________']]
-    applied_row3_table = Table(applied_row3_data, colWidths=[10.0*inch])
+    applied_row3_table = Table(applied_row3_data, colWidths=[full_width])
     applied_row3_table.setStyle(TableStyle([
         ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
