@@ -308,7 +308,7 @@ def render_map_image(gdf):
         "Other":                 "#aaaaaa",
     }
 
-    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+    fig, ax = plt.subplots(1, 1, figsize=(14, 8))
 
     # Draw each polygon colored by category
     for cat, color in cat_colors.items():
@@ -380,14 +380,24 @@ def export_pdf(gdf, filename="treatment_areas"):
     margin = 0.5 * inch
 
     # All pages portrait orientation
-    doc = SimpleDocTemplate(buf, pagesize=letter,
-                            topMargin=margin, bottomMargin=margin,
-                            leftMargin=margin, rightMargin=margin)
+    # Use BaseDocTemplate with landscape + portrait page templates
+    doc = BaseDocTemplate(buf, pagesize=landscape(letter),
+                          topMargin=margin, bottomMargin=margin,
+                          leftMargin=margin, rightMargin=margin)
+
+    lw, lh = landscape(letter)
+    pw, ph = letter
+    landscape_frame = Frame(margin, margin, lw - 2*margin, lh - 2*margin, id='land')
+    portrait_frame = Frame(margin, margin, pw - 2*margin, ph - 2*margin, id='port')
+    doc.addPageTemplates([
+        PageTemplate(id='landscape', frames=[landscape_frame], pagesize=landscape(letter)),
+        PageTemplate(id='portrait', frames=[portrait_frame], pagesize=letter),
+    ])
 
     styles = getSampleStyleSheet()
     story = []
 
-    # ── Page 1: Title + Map (portrait) ──
+    # ── Page 1: Title + Map (landscape) ──
     title_style = ParagraphStyle("Title2", parent=styles["Title"], fontSize=20, spaceAfter=4)
     story.append(Paragraph("Valley Air Map Builder — Treatment Area Report", title_style))
 
@@ -413,8 +423,8 @@ def export_pdf(gdf, filename="treatment_areas"):
         with PILImage.open(map_tmp_path) as pil_img:
             img_w, img_h = pil_img.size
 
-        max_w = 7.5 * inch
-        max_h = 7.0 * inch  # leave room for title + summary text
+        max_w = 10.0 * inch   # landscape usable width
+        max_h = 5.5 * inch   # leave room for title + summary text
         aspect = img_w / img_h
 
         # Scale to fit within max_w x max_h while preserving aspect ratio
@@ -450,12 +460,14 @@ def export_pdf(gdf, filename="treatment_areas"):
     if summary_parts:
         story.append(Paragraph(" &nbsp;&nbsp;|&nbsp;&nbsp; ".join(summary_parts), styles["Normal"]))
 
-    # ── Page 2: Work Order Form ──
+    # ── Page 2: Work Order Form (switch to portrait) ──
+    story.append(NextPageTemplate('portrait'))
     story.append(PageBreak())
     work_order_elements = build_work_order_page(gdf, styles)
     story.extend(work_order_elements)
 
-    # ── Page 3: Data Table ──
+    # ── Page 3: Data Table (switch back to landscape) ──
+    story.append(NextPageTemplate('landscape'))
     story.append(PageBreak())
     story.append(Paragraph("Treatment Area Details", styles["Heading1"]))
     story.append(Spacer(1, 8))
@@ -477,7 +489,7 @@ def export_pdf(gdf, filename="treatment_areas"):
             notes_text,
         ])
 
-    col_widths = [1.1*inch, 0.9*inch, 0.9*inch, 0.7*inch, 0.6*inch, 0.7*inch, 0.7*inch, 1.9*inch]
+    col_widths = [1.4*inch, 1.2*inch, 1.2*inch, 0.8*inch, 0.7*inch, 0.8*inch, 0.8*inch, 3.1*inch]
     t = Table(table_data, colWidths=col_widths, repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
@@ -935,6 +947,7 @@ if st.session_state.page == "draw":
                     st.session_state.features.append(feature)
                     st.session_state.pending_drawing = None
                     st.success(f"Saved '{name.strip()}' — {area_acres:,.2f} acres!")
+                    st.rerun()
         with col_discard:
             if st.button("Discard Drawing", use_container_width=True):
                 st.session_state.pending_drawing = None
