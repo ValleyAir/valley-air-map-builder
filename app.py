@@ -510,6 +510,7 @@ def parse_treatment_selection(selection):
 def build_work_order_page(gdf, styles):
     """
     Build a professional work order form page for Valley Air LLC.
+    Uses full landscape page width (10" usable) with generous spacing for handwriting.
 
     Args:
         gdf: GeoDataFrame with location data containing 'name', 'area_acres', 'category' columns
@@ -530,62 +531,97 @@ def build_work_order_page(gdf, styles):
         alignment=1  # center
     )
 
+    section_header_style = ParagraphStyle(
+        'SectionHeader',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.white,
+        fontName='Helvetica-Bold',
+        spaceAfter=0,
+        leftIndent=4
+    )
+
     small_bold = ParagraphStyle(
         'SmallBold',
         parent=styles['Normal'],
-        fontSize=7,
+        fontSize=8,
         textColor=colors.black,
         fontName='Helvetica-Bold',
-        spaceAfter=1
+        spaceAfter=2
     )
 
     current_date = datetime.now().strftime("%m/%d/%Y")
+    full_width = 10.0 * inch
 
     # ===== HEADER SECTION =====
     story.append(Paragraph("Valley Air LLC — Work Order", header_style))
     story.append(Spacer(1, 0.15*inch))
 
-    # Header row: Job #, Status, Date
+    # Header row: Job #, Status, Date (full width)
     header_data = [
-        ['Job #: ________________', 'Status: ________________', f'Date: {current_date}']
+        ['Job #: _________________________', 'Status: _________________________', f'Date: {current_date}']
     ]
-    header_table = Table(header_data, colWidths=[2.2*inch, 2.2*inch, 1.8*inch])
+    header_table = Table(header_data, colWidths=[3.2*inch, 3.2*inch, 3.6*inch])
     header_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
         ('LINEBELOW', (0, 0), (0, 0), 0.5, colors.black),
         ('LINEBELOW', (1, 0), (1, 0), 0.5, colors.black),
     ]))
     story.append(header_table)
-    story.append(Spacer(1, 0.15*inch))
+    story.append(Spacer(1, 0.20*inch))
 
     # ===== SCHEDULING SECTION =====
-    story.append(Paragraph("SCHEDULING", small_bold))
+    section_bg = colors.HexColor('#cccccc')
+    story.append(Table(
+        [['SCHEDULING']],
+        colWidths=[full_width],
+        style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), section_bg),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica-Bold', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ])
+    ))
+
     scheduling_data = [[
-        'Call Date\n_________',
-        'Date Proposed\n_________',
-        'Time Proposed\n_________',
-        'Schedule Date\n_________',
-        'Date Expires\n_________',
-        'Consultant\n_________'
+        Paragraph('<b>Call Date</b><br/>____________________', styles['Normal']),
+        Paragraph('<b>Date Proposed</b><br/>____________________', styles['Normal']),
+        Paragraph('<b>Time Proposed</b><br/>____________________', styles['Normal']),
+        Paragraph('<b>Schedule Date</b><br/>____________________', styles['Normal']),
+        Paragraph('<b>Date Expires</b><br/>____________________', styles['Normal']),
+        Paragraph('<b>Consultant</b><br/>____________________', styles['Normal'])
     ]]
-    scheduling_table = Table(scheduling_data, colWidths=[0.9*inch, 0.9*inch, 0.9*inch, 0.9*inch, 0.9*inch, 1.0*inch])
+    scheduling_table = Table(scheduling_data, colWidths=[1.65*inch, 1.65*inch, 1.65*inch, 1.65*inch, 1.65*inch, 1.65*inch])
     scheduling_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('LEFTPADDING', (0, 0), (-1, -1), 2),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-        ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(scheduling_table)
-    story.append(Spacer(1, 0.12*inch))
+    story.append(Spacer(1, 0.20*inch))
 
     # ===== LOCATIONS TABLE =====
-    story.append(Paragraph("LOCATIONS", small_bold))
+    story.append(Table(
+        [['LOCATIONS']],
+        colWidths=[full_width],
+        style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), section_bg),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica-Bold', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ])
+    ))
 
     # Build locations table
     locations_data = [['Map #', 'Location/Customer', 'Acres', 'Planted', 'Applied', 'Wind', 'Crop', 'Strip', 'Pests']]
@@ -601,14 +637,28 @@ def build_work_order_page(gdf, styles):
 
         locations_data.append([
             str(map_num),
-            location_name[:15],  # truncate for space
+            location_name,  # Full name, no truncation
             f"{acres:.2f}",
-            '_____',
-            '_____',
-            '_____',
-            crop[:8],  # truncate
-            '_____',
-            '_____'
+            '___________',
+            '___________',
+            '___________',
+            crop,  # Full category, no truncation
+            '___________',
+            '___________'
+        ])
+
+    # Add 3-4 extra blank rows for additional locations
+    for _ in range(4):
+        locations_data.append([
+            '____',
+            '___________________',
+            '________',
+            '___________',
+            '___________',
+            '___________',
+            '___________________',
+            '___________',
+            '___________'
         ])
 
     # Add total row
@@ -624,7 +674,7 @@ def build_work_order_page(gdf, styles):
         ''
     ])
 
-    locations_table = Table(locations_data, colWidths=[0.45*inch, 1.1*inch, 0.55*inch, 0.50*inch, 0.55*inch, 0.45*inch, 0.55*inch, 0.50*inch, 0.55*inch])
+    locations_table = Table(locations_data, colWidths=[0.45*inch, 2.5*inch, 0.6*inch, 0.75*inch, 0.75*inch, 0.65*inch, 1.2*inch, 0.75*inch, 0.75*inch])
 
     # Style locations table
     header_fill = colors.HexColor('#2c3e50')
@@ -632,156 +682,240 @@ def build_work_order_page(gdf, styles):
         # Header row
         ('BACKGROUND', (0, 0), (-1, 0), header_fill),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 7),
+        ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 8),
         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
         ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, 0), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
 
         # Data rows
-        ('FONT', (0, 1), (-1, -2), 'Helvetica', 7),
+        ('FONT', (0, 1), (-1, -2), 'Helvetica', 8),
         ('ALIGN', (0, 1), (-1, -2), 'CENTER'),
-        ('VALIGN', (0, 1), (-1, -2), 'MIDDLE'),
-        ('TOPPADDING', (0, 1), (-1, -2), 3),
-        ('BOTTOMPADDING', (0, 1), (-1, -2), 3),
+        ('VALIGN', (0, 1), (-1, -2), 'TOP'),
+        ('TOPPADDING', (0, 1), (-1, -2), 8),
+        ('BOTTOMPADDING', (0, 1), (-1, -2), 8),
 
         # Alternating row backgrounds
         ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#f0f0f0')]),
 
         # Total row
         ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8e8e8')),
-        ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 7),
+        ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 8),
         ('ALIGN', (0, -1), (-1, -1), 'CENTER'),
-        ('TOPPADDING', (0, -1), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, -1), (-1, -1), 3),
+        ('TOPPADDING', (0, -1), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, -1), (-1, -1), 6),
 
         # Grid lines
         ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(locations_table)
-    story.append(Spacer(1, 0.10*inch))
+    story.append(Spacer(1, 0.20*inch))
 
     # ===== CHEMICALS / CHARGES TABLE =====
-    story.append(Paragraph("CHEMICALS / CHARGES", small_bold))
+    story.append(Table(
+        [['CHEMICALS / CHARGES']],
+        colWidths=[full_width],
+        style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), section_bg),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica-Bold', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ])
+    ))
 
     chemicals_data = [['Chemical/Charge', 'Vendor', 'Rate/ac', 'UM', 'Total Applied']]
-    for _ in range(4):
-        chemicals_data.append(['_____________', '_________', '_____', '_____', '__________'])
+    for _ in range(6):
+        chemicals_data.append(['_____________________', '___________________', '__________', '__________', '__________'])
 
-    chemicals_table = Table(chemicals_data, colWidths=[2.0*inch, 1.4*inch, 0.9*inch, 0.7*inch, 1.0*inch])
+    chemicals_table = Table(chemicals_data, colWidths=[2.5*inch, 2.5*inch, 1.5*inch, 1.5*inch, 2.0*inch])
     chemicals_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), header_fill),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 7),
+        ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 8),
         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('TOPPADDING', (0, 0), (-1, 0), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
 
-        ('FONT', (0, 1), (-1, -1), 'Helvetica', 7),
+        ('FONT', (0, 1), (-1, -1), 'Helvetica', 8),
         ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 1), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 3),
+        ('VALIGN', (0, 1), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
 
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f0f0f0')]),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(chemicals_table)
+    story.append(Spacer(1, 0.08*inch))
 
-    # Chemicals footer info
-    chem_footer_data = [['Diluent Rate: ___________', 'Hours Reentry: ___________', 'Days Preharvest: ___________']]
-    chem_footer_table = Table(chem_footer_data, colWidths=[2.2*inch, 2.2*inch, 2.2*inch])
+    # Chemicals footer info in full-width table
+    chem_footer_data = [['Diluent Rate: ____________________', 'Hours Reentry: ____________________', 'Days Preharvest: ____________________']]
+    chem_footer_table = Table(chem_footer_data, colWidths=[3.3*inch, 3.3*inch, 3.4*inch])
     chem_footer_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
     story.append(chem_footer_table)
-    story.append(Spacer(1, 0.10*inch))
+    story.append(Spacer(1, 0.20*inch))
 
     # ===== LOADER WORKSHEET SECTION =====
-    story.append(Paragraph("LOADER WORKSHEET", small_bold))
+    story.append(Table(
+        [['LOADER WORKSHEET']],
+        colWidths=[full_width],
+        style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), section_bg),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica-Bold', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ])
+    ))
 
-    loader_row1_data = [['Select Applicator: ___________', 'Vehicle: ___________', 'Vehicle Capacity: ___________', 'Rate: _____', 'GL: ______']]
-    loader_row1_table = Table(loader_row1_data, colWidths=[1.2*inch, 1.1*inch, 1.3*inch, 0.8*inch, 0.8*inch])
+    loader_row1_data = [['Select Applicator: ____________________', 'Vehicle: ____________________', 'Vehicle Capacity: ____________________', 'Rate: __________', 'GL: __________']]
+    loader_row1_table = Table(loader_row1_data, colWidths=[2.0*inch, 2.0*inch, 2.4*inch, 1.6*inch, 1.8*inch])
     loader_row1_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(loader_row1_table)
 
-    loader_row2_data = [['Acre: _____', f'Total Job Acres: {total_acres:.2f}', 'Loads: _____', '', '']]
-    loader_row2_table = Table(loader_row2_data, colWidths=[1.2*inch, 1.1*inch, 1.3*inch, 0.8*inch, 0.8*inch])
+    loader_row2_data = [['Acre: __________', f'Total Job Acres: {total_acres:.2f}', 'Loads: __________', '', '']]
+    loader_row2_table = Table(loader_row2_data, colWidths=[2.0*inch, 2.0*inch, 2.4*inch, 1.6*inch, 1.8*inch])
     loader_row2_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(loader_row2_table)
-    story.append(Spacer(1, 0.10*inch))
+    story.append(Spacer(1, 0.20*inch))
 
     # ===== APPLIED INFO SECTION =====
-    story.append(Paragraph("APPLIED INFO", small_bold))
+    story.append(Table(
+        [['APPLIED INFO']],
+        colWidths=[full_width],
+        style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), section_bg),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica-Bold', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ])
+    ))
 
-    applied_row1_data = [['Applicator: ___________', 'Vehicle: ___________', 'Application Date: ___________']]
-    applied_row1_table = Table(applied_row1_data, colWidths=[1.8*inch, 1.8*inch, 2.0*inch])
+    applied_row1_data = [['Applicator: ____________________', 'Vehicle: ____________________', 'Application Date: ____________________']]
+    applied_row1_table = Table(applied_row1_data, colWidths=[3.2*inch, 3.2*inch, 3.6*inch])
     applied_row1_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(applied_row1_table)
 
-    applied_row2_data = [['Beg. Tach: _____', 'End Tach: _____', 'Net Tach: _____', 'Flights: _____', 'Starts: _____']]
-    applied_row2_table = Table(applied_row2_data, colWidths=[1.4*inch, 1.4*inch, 1.4*inch, 1.0*inch, 1.0*inch])
+    applied_row2_data = [['Beg. Tach: __________', 'End Tach: __________', 'Net Tach: __________', 'Flights: __________', 'Starts: __________']]
+    applied_row2_table = Table(applied_row2_data, colWidths=[2.0*inch, 2.0*inch, 2.0*inch, 2.0*inch, 2.0*inch])
     applied_row2_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(applied_row2_table)
-    story.append(Spacer(1, 0.08*inch))
+    story.append(Spacer(1, 0.12*inch))
 
     # Weather sub-section
-    story.append(Paragraph("WEATHER", small_bold))
+    story.append(Table(
+        [['WEATHER (Start)']],
+        colWidths=[full_width],
+        style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), section_bg),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica-Bold', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ])
+    ))
 
-    weather_row1_data = [['Start Time: _____', 'Start Temp (°F): _____', 'Start Wind Dir: _____', 'Start Wind mph: _____', 'Start Humidity: _____']]
-    weather_row1_table = Table(weather_row1_data, colWidths=[1.0*inch, 1.2*inch, 1.1*inch, 1.1*inch, 1.2*inch])
+    weather_row1_data = [['Start Time: __________', 'Start Temp (°F): __________', 'Start Wind Dir: __________', 'Start Wind mph: __________', 'Start Humidity: __________']]
+    weather_row1_table = Table(weather_row1_data, colWidths=[2.0*inch, 2.0*inch, 2.0*inch, 2.0*inch, 2.0*inch])
     weather_row1_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(weather_row1_table)
 
-    weather_row2_data = [['End Time: _____', 'End Temp (°F): _____', 'End Wind Dir: _____', 'End Wind mph: _____', 'End Humidity: _____']]
-    weather_row2_table = Table(weather_row2_data, colWidths=[1.0*inch, 1.2*inch, 1.1*inch, 1.1*inch, 1.2*inch])
+    story.append(Table(
+        [['WEATHER (End)']],
+        colWidths=[full_width],
+        style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), section_bg),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica-Bold', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ])
+    ))
+
+    weather_row2_data = [['End Time: __________', 'End Temp (°F): __________', 'End Wind Dir: __________', 'End Wind mph: __________', 'End Humidity: __________']]
+    weather_row2_table = Table(weather_row2_data, colWidths=[2.0*inch, 2.0*inch, 2.0*inch, 2.0*inch, 2.0*inch])
     weather_row2_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(weather_row2_table)
 
-    applied_row3_data = [['Total Time: ___________']]
-    applied_row3_table = Table(applied_row3_data, colWidths=[6.0*inch])
+    story.append(Spacer(1, 0.10*inch))
+
+    applied_row3_data = [['Total Time: ____________________']]
+    applied_row3_table = Table(applied_row3_data, colWidths=[10.0*inch])
     applied_row3_table.setStyle(TableStyle([
-        ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('FONT', (0, 0), (-1, -1), 'Helvetica', 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
     story.append(applied_row3_table)
-    story.append(Spacer(1, 0.08*inch))
+    story.append(Spacer(1, 0.15*inch))
 
     # Comments section
-    story.append(Paragraph("COMMENTS:", small_bold))
-    comment_data = [['_' * 120]]
-    comment_table = Table(comment_data, colWidths=[5.8*inch])
+    story.append(Table(
+        [['COMMENTS']],
+        colWidths=[full_width],
+        style=TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), section_bg),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica-Bold', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ])
+    ))
+
+    comment_data = [['_' * 200]]
+    comment_table = Table(comment_data, colWidths=[full_width])
     comment_table.setStyle(TableStyle([
         ('FONT', (0, 0), (-1, -1), 'Helvetica', 7),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ('LEFTPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('HEIGHT', (0, 0), (-1, -1), 0.5*inch),
+        ('HEIGHT', (0, 0), (-1, -1), 1.0*inch),
     ]))
     story.append(comment_table)
 
