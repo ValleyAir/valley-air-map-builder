@@ -1,8 +1,8 @@
 """
-Valley Air Map Builder 1.0
+Valley Air Map Builder 2.0
 ====================
 Draw treatment areas on an interactive map, assign attributes,
-and export as ESRI Shapefiles (.shp) or GeoJSON.
+and export as ESRI Shapefiles (.shp), GeoJSON, KML, or KMZ.
 
 Usage:
     streamlit run app.py
@@ -33,7 +33,7 @@ import xml.etree.ElementTree as ET
 # ──────────────────────────────────────────────────────────────
 # Page Config
 # ──────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Valley Air Map Builder 1.0", page_icon="🗺️", layout="wide")
+st.set_page_config(page_title="Valley Air Map Builder 2.0", page_icon="🗺️", layout="wide")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -288,6 +288,138 @@ def export_shapefile(gdf, filename="treatment_areas"):
                     zf.write(fpath, f"{filename}{ext}")
         buf.seek(0)
         return buf
+
+
+def export_kml(gdf, filename="treatment_areas"):
+    """Export GeoDataFrame to KML format.
+
+    Uses GDAL/Fiona KML driver via geopandas. Falls back to manual XML
+    generation if the driver is unavailable.
+
+    Args:
+        gdf: GeoDataFrame with treatment area features
+        filename: base filename (without extension)
+
+    Returns:
+        io.BytesIO buffer containing the KML file content
+    """
+    # Ensure WGS 84 for KML (required by the KML specification)
+    gdf_4326 = gdf.to_crs("EPSG:4326") if str(gdf.crs) != "EPSG:4326" else gdf.copy()
+
+    # Try GDAL KML driver first
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            kml_path = os.path.join(tmpdir, f"{filename}.kml")
+            gdf_4326.to_file(kml_path, driver="KML")
+            buf = io.BytesIO()
+            with open(kml_path, "rb") as f:
+                buf.write(f.read())
+            buf.seek(0)
+            return buf
+    except Exception:
+        pass
+
+    # Fallback: manual KML generation via xml.etree.ElementTree
+    kml_ns = "http://www.opengis.net/kml/2.2"
+    root = ET.Element("kml", xmlns=kml_ns)
+    document = ET.SubElement(root, "Document")
+    ET.SubElement(document, "name").text = filename
+
+    # Define category styles
+    style_map = {
+        "Forestry / Vegetation": ("style_forestry", "228B22"),
+        "Agriculture": ("style_agriculture", "DAA520"),
+        "Environmental Cleanup": ("style_environmental", "4682B4"),
+        "Other": ("style_other", "808080"),
+    }
+    for cat, (style_id, hex_color) in style_map.items():
+        style_elem = ET.SubElement(document, "Style", id=style_id)
+        poly_style = ET.SubElement(style_elem, "PolyStyle")
+        # KML uses aaBBGGRR format
+        r, g, b = hex_color[0:2], hex_color[2:4], hex_color[4:6]
+        ET.SubElement(poly_style, "color").text = f"88{b}{g}{r}"
+        ET.SubElement(poly_style, "outline").text = "1"
+        line_style = ET.SubElement(style_elem, "LineStyle")
+        ET.SubElement(line_style, "color").text = f"ff{b}{g}{r}"
+        ET.SubElement(line_style, "width").text = "2"
+
+    for _, row in gdf_4326.iterrows():
+        pm = ET.SubElement(document, "Placemark")
+        ET.SubElement(pm, "name").text = str(row.get("name", ""))
+        # Build description from properties
+        desc_parts = []
+        for field in ["category", "treatment_type", "status", "priority", "area_acres", "notes", "date_created"]:
+            val = row.get(field, "")
+            if val:
+                desc_parts.append(f"{field}: {val}")
+        ET.SubElement(pm, "description").text = "\n".join(desc_parts)
+
+        # Apply style
+        cat = row.get("category", "Other")
+        style_id = style_map.get(cat, style_map["Other"])[0]
+        ET.SubElement(pm, "styleUrl").text = f"#{style_id}"
+
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+
+        if geom.geom_type == "Point":
+            point_elem = ET.SubElement(pm, "Point")
+            ET.SubElement(point_elem, "coordinates").text = f"{geom.x},{geom.y},0"
+        elif geom.geom_type == "LineString":
+            ls_elem = ET.SubElement(pm, "LineString")
+            coords = " ".join(f"{x},{y},0" for x, y in geom.coords)
+            ET.SubElement(ls_elem, "coordinates").text = coords
+        elif geom.geom_type == "Polygon":
+            poly_elem = ET.SubElement(pm, "Polygon")
+            outer = ET.SubElement(poly_elem, "outerBoundaryIs")
+            ring = ET.SubElement(outer, "LinearRing")
+            coords = " ".join(f"{x},{y},0" for x, y in geom.exterior.coords)
+            ET.SubElement(ring, "coordinates").text = coords
+            for interior in geom.interiors:
+                inner = ET.SubElement(poly_elem, "innerBoundaryIs")
+                inner_ring = ET.SubElement(inner, "LinearRing")
+                inner_coords = " ".join(f"{x},{y},0" for x, y in interior.coords)
+                ET.SubElement(inner_ring, "coordinates").text = inner_coords
+        elif geom.geom_type == "MultiPolygon":
+            multi_geom = ET.SubElement(pm, "MultiGeometry")
+            for poly in geom.geoms:
+                poly_elem = ET.SubElement(multi_geom, "Polygon")
+                outer = ET.SubElement(poly_elem, "outerBoundaryIs")
+                ring = ET.SubElement(outer, "LinearRing")
+                coords = " ".join(f"{x},{y},0" for x, y in poly.exterior.coords)
+                ET.SubElement(ring, "coordinates").text = coords
+                for interior in poly.interiors:
+                    inner = ET.SubElement(poly_elem, "innerBoundaryIs")
+                    inner_ring = ET.SubElement(inner, "LinearRing")
+                    inner_coords = " ".join(f"{x},{y},0" for x, y in interior.coords)
+                    ET.SubElement(inner_ring, "coordinates").text = inner_coords
+
+    tree = ET.ElementTree(root)
+    buf = io.BytesIO()
+    tree.write(buf, encoding="unicode", xml_declaration=True)
+    kml_bytes = buf.getvalue().encode("utf-8")
+    result = io.BytesIO(kml_bytes)
+    result.seek(0)
+    return result
+
+
+def export_kmz(gdf, filename="treatment_areas"):
+    """Export GeoDataFrame to KMZ format (zipped KML).
+
+    Args:
+        gdf: GeoDataFrame with treatment area features
+        filename: base filename (without extension)
+
+    Returns:
+        io.BytesIO buffer containing the KMZ file content
+    """
+    kml_buf = export_kml(gdf, filename=filename)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("doc.kml", kml_buf.read())
+    buf.seek(0)
+    return buf
 
 
 def render_map_image(gdf):
@@ -718,7 +850,7 @@ def build_work_order_page(gdf, styles):
 # Sidebar — Navigation + Upload + Stats
 # ──────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("Valley Air Map Builder 1.0")
+    st.header("Valley Air Map Builder 2.0")
 
     st.subheader("Navigation")
     if st.button("🗺️ Draw on Map", use_container_width=True,
@@ -1053,7 +1185,9 @@ elif st.session_state.page == "export":
             export_format = st.selectbox("Format", [
                 "Shapefile (.shp — zipped)",
                 "GeoJSON (.geojson)",
-                "PDF Report (.pdf)"
+                "KML (.kml)",
+                "KMZ (.kmz)",
+                "PDF Report (.pdf)",
             ], key="export_format")
 
             st.caption("**Optional Filters**")
@@ -1099,6 +1233,24 @@ elif st.session_state.page == "export":
                         mime="application/json",
                         type="primary",
                     )
+                elif "KML" in export_format and "KMZ" not in export_format:
+                    kml_buf = export_kml(gdf_export, filename=export_name)
+                    st.download_button(
+                        "Download KML",
+                        data=kml_buf,
+                        file_name=f"{export_name}.kml",
+                        mime="application/vnd.google-earth.kml+xml",
+                        type="primary",
+                    )
+                elif "KMZ" in export_format:
+                    kmz_buf = export_kmz(gdf_export, filename=export_name)
+                    st.download_button(
+                        "Download KMZ",
+                        data=kmz_buf,
+                        file_name=f"{export_name}.kmz",
+                        mime="application/vnd.google-earth.kmz",
+                        type="primary",
+                    )
                 elif "PDF" in export_format:
                     pdf_buf = export_pdf(gdf_export, filename=export_name)
                     st.download_button(
@@ -1114,4 +1266,4 @@ elif st.session_state.page == "export":
 
 # Footer
 st.divider()
-st.caption("Valley Air Map Builder 1.0 • Built with Streamlit, Folium & GeoPandas")
+st.caption("Valley Air Map Builder 2.0 • Built with Streamlit, Folium & GeoPandas")
