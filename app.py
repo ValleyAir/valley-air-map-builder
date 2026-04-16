@@ -36,7 +36,7 @@ import xml.etree.ElementTree as ET
 # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Page Config
 # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-st.set_page_config(page_title="Valley Air Map Builder 2.0", page_icon="ðºï¸", layout="wide")
+st.set_page_config(page_title="Valley Air Map Builder 2.0", page_icon="map", layout="wide")
 
 
 # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
@@ -934,15 +934,15 @@ with st.sidebar:
     st.header("Valley Air Map Builder 2.0")
 
     st.subheader("Navigation")
-    if st.button("ðºï¸ Draw on Map", use_container_width=True,
+    if st.button("Draw on Map", use_container_width=True,
                  type="primary" if st.session_state.page == "draw" else "secondary"):
         st.session_state.page = "draw"
         st.rerun()
-    if st.button("ð View / Edit Data", use_container_width=True,
+    if st.button("View / Edit Data", use_container_width=True,
                  type="primary" if st.session_state.page == "list" else "secondary"):
         st.session_state.page = "list"
         st.rerun()
-    if st.button("ð¤ Export", use_container_width=True,
+    if st.button("Export", use_container_width=True,
                  type="primary" if st.session_state.page == "export" else "secondary"):
         st.session_state.page = "export"
         st.rerun()
@@ -950,7 +950,7 @@ with st.sidebar:
     st.divider()
 
     # Upload
-    st.subheader("ð Import Data")
+    st.subheader("Import Data")
     uploaded_file = st.file_uploader(
         "Upload zipped shapefile, GeoJSON, KML, or KMZ",
         type=["zip", "geojson", "json", "kml", "kmz"],
@@ -1021,7 +1021,7 @@ with st.sidebar:
     st.divider()
 
     # Stats
-    st.subheader("ð Summary")
+    st.subheader("Summary")
     n = len(st.session_state.features)
     st.metric("Treatment Areas", n)
     if n > 0:
@@ -1032,7 +1032,7 @@ with st.sidebar:
         st.metric("Total Acreage", f"{total_acres:,.2f} ac")
 
     st.divider()
-    if st.button("ðï¸ Clear All", type="secondary"):
+    if st.button("Clear All", type="secondary"):
         st.session_state.features = []
         st.session_state.pending_drawing = None
         st.rerun()
@@ -1042,7 +1042,7 @@ with st.sidebar:
 # PAGE: Draw on Map
 # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 if st.session_state.page == "draw":
-    st.title("ðºï¸ Draw Treatment Areas")
+    st.title("Draw Treatment Areas")
 
     # -- SEARCH LOCATION --
     with st.expander("Search Location", expanded=False):
@@ -1238,7 +1238,7 @@ if st.session_state.page == "draw":
 # PAGE: View / Edit Data
 # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 elif st.session_state.page == "list":
-    st.title("ð Treatment Areas")
+    st.title("Treatment Areas")
 
     if not st.session_state.features:
         st.info("No treatment areas yet. Go to **Draw on Map** to create some, or import a shapefile.")
@@ -1298,7 +1298,7 @@ elif st.session_state.page == "list":
 # PAGE: Export
 # ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 elif st.session_state.page == "export":
-    st.title("ð¤ Export Treatment Areas")
+    st.title("Export Treatment Areas")
 
     if not st.session_state.features:
         st.info("No treatment areas to export. Draw on the map or import data first.")
