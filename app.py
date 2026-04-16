@@ -18,6 +18,9 @@ import os
 import tempfile
 import zipfile
 import io
+import re
+import requests
+import math
 from datetime import datetime
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
@@ -30,15 +33,15 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import xml.etree.ElementTree as ET
 
 
-# ──────────────────────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Page Config
-# ──────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Valley Air Map Builder 2.0", page_icon="🗺️", layout="wide")
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+st.set_page_config(page_title="Valley Air Map Builder 2.0", page_icon="ðºï¸", layout="wide")
 
 
-# ──────────────────────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Constants
-# ──────────────────────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 TREATMENT_CATEGORIES = {
     "Forestry / Vegetation": [
         "Timber Harvest", "Fuels Reduction", "Reforestation",
@@ -64,12 +67,12 @@ DEFAULT_CRS = "EPSG:4326"
 ALL_TREATMENT_TYPES = []
 for cat, types in TREATMENT_CATEGORIES.items():
     for t in types:
-        ALL_TREATMENT_TYPES.append(f"{cat} — {t}")
+        ALL_TREATMENT_TYPES.append(f"{cat} â {t}")
 
 
-# ──────────────────────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Session State
-# ──────────────────────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 if "features" not in st.session_state:
     st.session_state.features = []
 if "pending_drawing" not in st.session_state:
@@ -77,11 +80,13 @@ if "pending_drawing" not in st.session_state:
 # Page navigation: "draw", "list", "export"
 if "page" not in st.session_state:
     st.session_state.page = "draw"
+if "search_result" not in st.session_state:
+    st.session_state.search_result = None
 
 
-# ──────────────────────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Helper Functions
-# ──────────────────────────────────────────────────────────────
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def extract_kml_from_kmz(kmz_bytes):
     """Extract KML content from a KMZ (zipped KML) file.
@@ -477,7 +482,7 @@ def render_map_image(gdf):
         try:
             cx.add_basemap(ax, source=cx.providers.OpenTopoMap, zoom="auto")
         except Exception:
-            pass  # No basemap — polygons still render on white background
+            pass  # No basemap â polygons still render on white background
 
     # Pad bounds so polygons aren't edge-to-edge
     xmin, ymin, xmax, ymax = gdf_3857.total_bounds
@@ -529,9 +534,9 @@ def export_pdf(gdf, filename="treatment_areas"):
     styles = getSampleStyleSheet()
     story = []
 
-    # ── Page 1: Title + Map (landscape) ──
+    # ââ Page 1: Title + Map (landscape) ââ
     title_style = ParagraphStyle("Title2", parent=styles["Title"], fontSize=20, spaceAfter=4)
-    story.append(Paragraph("Valley Air Map Builder — Treatment Area Report", title_style))
+    story.append(Paragraph("Valley Air Map Builder â Treatment Area Report", title_style))
 
     total_acres = gdf["area_acres"].sum() if "area_acres" in gdf.columns else 0
     story.append(Paragraph(
@@ -542,7 +547,7 @@ def export_pdf(gdf, filename="treatment_areas"):
     ))
     story.append(Spacer(1, 10))
 
-    # Render map image — scale proportionally to fit portrait page
+    # Render map image â scale proportionally to fit portrait page
     map_tmp_path = None
     try:
         map_img_buf = render_map_image(gdf)
@@ -561,11 +566,11 @@ def export_pdf(gdf, filename="treatment_areas"):
 
         # Scale to fit within max_w x max_h while preserving aspect ratio
         if aspect >= (max_w / max_h):
-            # Image is wider than box — fit to width
+            # Image is wider than box â fit to width
             pdf_w = max_w
             pdf_h = max_w / aspect
         else:
-            # Image is taller than box — fit to height
+            # Image is taller than box â fit to height
             pdf_h = max_h
             pdf_w = max_h * aspect
 
@@ -592,13 +597,13 @@ def export_pdf(gdf, filename="treatment_areas"):
     if summary_parts:
         story.append(Paragraph(" &nbsp;&nbsp;|&nbsp;&nbsp; ".join(summary_parts), styles["Normal"]))
 
-    # ── Page 2: Work Order Form (switch to portrait) ──
+    # ââ Page 2: Work Order Form (switch to portrait) ââ
     story.append(NextPageTemplate('portrait'))
     story.append(PageBreak())
     work_order_elements = build_work_order_page(gdf, styles)
     story.extend(work_order_elements)
 
-    # ── Page 3: Data Table (switch back to landscape) ──
+    # ââ Page 3: Data Table (switch back to landscape) ââ
     story.append(NextPageTemplate('landscape'))
     story.append(PageBreak())
     story.append(Paragraph("Treatment Area Details", styles["Heading1"]))
@@ -668,9 +673,9 @@ def style_function(feature):
 
 
 def parse_treatment_selection(selection):
-    """Parse 'Category — Type' string back into category and type."""
-    if " — " in selection:
-        parts = selection.split(" — ", 1)
+    """Parse 'Category â Type' string back into category and type."""
+    if " â " in selection:
+        parts = selection.split(" â ", 1)
         return parts[0], parts[1]
     return "Other", selection
 
@@ -719,17 +724,17 @@ def build_work_order_page(gdf, styles):
 
     total_acres = gdf["area_acres"].sum() if "area_acres" in gdf.columns else 0.0
 
-    # ── TITLE ──
-    story.append(Paragraph("Valley Air LLC — Work Order", header_style))
+    # ââ TITLE ââ
+    story.append(Paragraph("Valley Air LLC â Work Order", header_style))
     story.append(Spacer(1, 6))
 
-    # ── JOB HEADER ──  3 cols = 7.5"
+    # ââ JOB HEADER ââ  3 cols = 7.5"
     story.append(fields_row([
         f'Job #: _______________', f'Status: _______________', f'Date: {current_date}',
     ]))
     story.append(Spacer(1, 8))
 
-    # ── SCHEDULING ──  6 cols = 7.5"
+    # ââ SCHEDULING ââ  6 cols = 7.5"
     story.append(section('SCHEDULING'))
     sc = ParagraphStyle('SchedCell', parent=styles['Normal'], fontSize=7, leading=10)
     story.append(fields_row([
@@ -742,7 +747,7 @@ def build_work_order_page(gdf, styles):
     ]))
     story.append(Spacer(1, 8))
 
-    # ── LOCATIONS ──  9 cols = 7.5"  (0.35+1.65+0.65+0.65+0.65+0.55+0.95+0.55+0.55)
+    # ââ LOCATIONS ââ  9 cols = 7.5"  (0.35+1.65+0.65+0.65+0.65+0.55+0.95+0.55+0.55)
     story.append(section('LOCATIONS'))
     loc_cw = [0.35*inch, 1.65*inch, 0.65*inch, 0.65*inch, 0.65*inch, 0.55*inch, 0.95*inch, 0.55*inch, 0.55*inch]
     loc_data = [['Map#', 'Location / Customer', 'Acres', 'Planted', 'Applied', 'Wind', 'Crop', 'Strip', 'Pests']]
@@ -769,7 +774,7 @@ def build_work_order_page(gdf, styles):
     story.append(loc_t)
     story.append(Spacer(1, 8))
 
-    # ── CHEMICALS / CHARGES ──  5 cols = 7.5"  (2.0+1.8+1.2+0.8+1.7)
+    # ââ CHEMICALS / CHARGES ââ  5 cols = 7.5"  (2.0+1.8+1.2+0.8+1.7)
     story.append(section('CHEMICALS / CHARGES'))
     chem_cw = [2.0*inch, 1.8*inch, 1.2*inch, 0.8*inch, 1.7*inch]
     chem_data = [['Chemical / Charge', 'Vendor', 'Rate/ac', 'UM', 'Total Applied']]
@@ -794,7 +799,7 @@ def build_work_order_page(gdf, styles):
     ]))
     story.append(Spacer(1, 8))
 
-    # ── LOADER WORKSHEET ──  5 cols = 7.5"
+    # ââ LOADER WORKSHEET ââ  5 cols = 7.5"
     story.append(section('LOADER WORKSHEET'))
     story.append(fields_row([
         'Applicator: __________', 'Vehicle: __________',
@@ -806,7 +811,7 @@ def build_work_order_page(gdf, styles):
     ]))
     story.append(Spacer(1, 8))
 
-    # ── APPLIED INFO ──  3 cols then 5 cols = 7.5"
+    # ââ APPLIED INFO ââ  3 cols then 5 cols = 7.5"
     story.append(section('APPLIED INFO'))
     story.append(fields_row([
         'Applicator: _____________', 'Vehicle: _____________', 'Appl. Date: _____________',
@@ -817,15 +822,15 @@ def build_work_order_page(gdf, styles):
     ]))
     story.append(Spacer(1, 4))
 
-    # ── WEATHER ──  5 cols = 7.5"
+    # ââ WEATHER ââ  5 cols = 7.5"
     story.append(section('WEATHER (Start)'))
     story.append(fields_row([
-        'Time: ________', 'Temp (°F): ______', 'Wind Dir: ______',
+        'Time: ________', 'Temp (Â°F): ______', 'Wind Dir: ______',
         'Wind mph: ______', 'Humidity: ______',
     ]))
     story.append(section('WEATHER (End)'))
     story.append(fields_row([
-        'Time: ________', 'Temp (°F): ______', 'Wind Dir: ______',
+        'Time: ________', 'Temp (Â°F): ______', 'Wind Dir: ______',
         'Wind mph: ______', 'Humidity: ______',
     ]))
     story.append(Spacer(1, 2))
@@ -834,7 +839,7 @@ def build_work_order_page(gdf, styles):
     story.append(fields_row(['Total Time: _______________', '', '']))
     story.append(Spacer(1, 6))
 
-    # ── COMMENTS ──
+    # ââ COMMENTS ââ
     story.append(section('COMMENTS'))
     comment_t = Table([['']], colWidths=[W], rowHeights=[0.8*inch])
     comment_t.setStyle(TableStyle([
@@ -846,22 +851,98 @@ def build_work_order_page(gdf, styles):
     return story
 
 
-# ──────────────────────────────────────────────────────────────
-# Sidebar — Navigation + Upload + Stats
-# ──────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------
+# Location Search Helpers
+# ----------------------------------------------------------------
+
+def _dms_to_decimal(degrees, minutes, seconds, direction):
+    dd = float(degrees) + float(minutes) / 60 + float(seconds) / 3600
+    if direction in ('S', 'W', 's', 'w'):
+        dd *= -1
+    return dd
+
+
+def parse_coordinates(text):
+    text = text.strip()
+    if not text:
+        return None
+    gm = re.search(r'@(-?[\d.]+),(-?[\d.]+)', text)
+    if gm:
+        return float(gm.group(1)), float(gm.group(2))
+    dd = re.match(r'^(-?[\d.]+)[,\s]+(-?[\d.]+)$', text)
+    if dd:
+        lat, lon = float(dd.group(1)), float(dd.group(2))
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon
+    dms = re.findall(
+        r"(\d+)[\xb0](\d+)['\u2019](\d+\.?\d*)[\"\u201d]\s*([NSns])"
+        r"[,\s]+"
+        r"(\d+)[\xb0](\d+)['\u2019](\d+\.?\d*)[\"\u201d]\s*([EWew])",
+        text,
+    )
+    if dms:
+        m = dms[0]
+        return _dms_to_decimal(m[0], m[1], m[2], m[3]), _dms_to_decimal(m[4], m[5], m[6], m[7])
+    mc = re.match(r'^(\d{2})(\d{2})(\d{2})([NSns])(\d{2,3})(\d{2})(\d{2})([EWew])$', text.replace(' ', ''))
+    if mc:
+        return _dms_to_decimal(mc.group(1), mc.group(2), mc.group(3), mc.group(4)), _dms_to_decimal(mc.group(5), mc.group(6), mc.group(7), mc.group(8))
+    return None
+
+
+def geocode_trs(township, ns_dir, range_num, ew_dir, section, state="ID", meridian="BO"):
+    BLM_URL = "https://gis.blm.gov/arcgis/rest/services/Cadastral/BLM_Natl_PLSS_CadNSDI/MapServer/1/query"
+    twp_str = f"T{township}{ns_dir}"
+    rng_str = f"R{range_num}{ew_dir}"
+    where = f"FRSTDIVNO = '{int(section):02d}' AND PLSSID LIKE '%{meridian}%{twp_str}%{rng_str}%'"
+    params = {"where": where, "outFields": "FRSTDIVNO,PLSSID,FRSTDIVLAB", "returnGeometry": "true", "f": "geojson", "outSR": "4326"}
+    try:
+        resp = requests.get(BLM_URL, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        feats = data.get("features", [])
+        if not feats:
+            return None
+        geom = feats[0]["geometry"]
+        coords = geom.get("coordinates", [])
+        ring = coords[0][0] if geom["type"] == "MultiPolygon" else coords[0] if geom["type"] == "Polygon" else (coords[0] if coords else [])
+        if not ring:
+            return None
+        lats = [c[1] for c in ring]
+        lons = [c[0] for c in ring]
+        label = f"{twp_str} {rng_str} Sec {section}"
+        return {"lat": sum(lats)/len(lats), "lon": sum(lons)/len(lons), "label": label, "polygon": [[c[1], c[0]] for c in ring]}
+    except Exception:
+        return None
+
+
+def parse_trs_string(text):
+    text = text.strip().upper().replace('.', '').replace(',', ' ')
+    m = re.match(r'T\s*(\d+)\s*([NS])\s*R\s*(\d+)\s*([EW])\s*(?:S(?:EC)?)?\s*(\d+)', text)
+    if m:
+        return {"township": int(m.group(1)), "ns_dir": m.group(2), "range_num": int(m.group(3)), "ew_dir": m.group(4), "section": int(m.group(5))}
+    m2 = re.match(r'(\d+)\s*([NS])\s+(\d+)\s*([EW])\s+(\d+)', text)
+    if m2:
+        return {"township": int(m2.group(1)), "ns_dir": m2.group(2), "range_num": int(m2.group(3)), "ew_dir": m2.group(4), "section": int(m2.group(5))}
+    return None
+
+
+
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Sidebar â Navigation + Upload + Stats
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 with st.sidebar:
     st.header("Valley Air Map Builder 2.0")
 
     st.subheader("Navigation")
-    if st.button("🗺️ Draw on Map", use_container_width=True,
+    if st.button("ðºï¸ Draw on Map", use_container_width=True,
                  type="primary" if st.session_state.page == "draw" else "secondary"):
         st.session_state.page = "draw"
         st.rerun()
-    if st.button("📋 View / Edit Data", use_container_width=True,
+    if st.button("ð View / Edit Data", use_container_width=True,
                  type="primary" if st.session_state.page == "list" else "secondary"):
         st.session_state.page = "list"
         st.rerun()
-    if st.button("📤 Export", use_container_width=True,
+    if st.button("ð¤ Export", use_container_width=True,
                  type="primary" if st.session_state.page == "export" else "secondary"):
         st.session_state.page = "export"
         st.rerun()
@@ -869,7 +950,7 @@ with st.sidebar:
     st.divider()
 
     # Upload
-    st.subheader("📂 Import Data")
+    st.subheader("ð Import Data")
     uploaded_file = st.file_uploader(
         "Upload zipped shapefile, GeoJSON, KML, or KMZ",
         type=["zip", "geojson", "json", "kml", "kmz"],
@@ -940,7 +1021,7 @@ with st.sidebar:
     st.divider()
 
     # Stats
-    st.subheader("📊 Summary")
+    st.subheader("ð Summary")
     n = len(st.session_state.features)
     st.metric("Treatment Areas", n)
     if n > 0:
@@ -951,19 +1032,60 @@ with st.sidebar:
         st.metric("Total Acreage", f"{total_acres:,.2f} ac")
 
     st.divider()
-    if st.button("🗑️ Clear All", type="secondary"):
+    if st.button("ðï¸ Clear All", type="secondary"):
         st.session_state.features = []
         st.session_state.pending_drawing = None
         st.rerun()
 
 
-# ══════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # PAGE: Draw on Map
-# ══════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 if st.session_state.page == "draw":
-    st.title("🗺️ Draw Treatment Areas")
+    st.title("ðºï¸ Draw Treatment Areas")
 
-    # ── STEP 1: The Map ──
+    # -- SEARCH LOCATION --
+    with st.expander("Search Location", expanded=False):
+        search_tab1, search_tab2 = st.tabs(["GPS Coordinates", "Legal Description (TRS)"])
+        with search_tab1:
+            gps_input = st.text_input("Enter coordinates or Google Maps URL", placeholder="46.0346, -118.2850", key="gps_input")
+            st.caption("Formats: decimal (46.0346, -118.2850) | DMS | Google Maps URL | McGregor (460204N1181706W)")
+            if st.button("Search GPS", key="btn_gps"):
+                result = parse_coordinates(gps_input)
+                if result:
+                    lat, lon = result
+                    st.session_state.search_result = {"lat": lat, "lon": lon, "label": f"{lat:.6f}, {lon:.6f}", "type": "gps"}
+                    st.rerun()
+                else:
+                    st.error("Could not parse coordinates. Check format and try again.")
+        with search_tab2:
+            trs_input = st.text_input("Enter TRS (e.g., T6N R30E S12)", placeholder="T6N R30E S12", key="trs_input")
+            col_st, col_mer = st.columns(2)
+            with col_st:
+                trs_state = st.selectbox("State", ["ID", "WA", "OR", "MT", "WY", "UT", "NV", "CA", "CO"], key="trs_state")
+            with col_mer:
+                trs_meridian = st.selectbox("Principal Meridian", ["BO", "WI", "SN", "HU", "NM", "MD", "US"],
+                    format_func=lambda x: {"BO": "Boise", "WI": "Willamette", "SN": "San Bernardino", "HU": "Humboldt", "NM": "New Mexico", "MD": "Mt. Diablo", "US": "Uintah Special"}.get(x, x), key="trs_meridian")
+            if st.button("Search TRS", key="btn_trs"):
+                parsed = parse_trs_string(trs_input)
+                if parsed:
+                    result = geocode_trs(parsed["township"], parsed["ns_dir"], parsed["range_num"], parsed["ew_dir"], parsed["section"], trs_state, trs_meridian)
+                    if result:
+                        result["type"] = "trs"
+                        st.session_state.search_result = result
+                        st.rerun()
+                    else:
+                        st.error("Section not found in BLM database. Check TRS values and meridian.")
+                else:
+                    st.error("Could not parse TRS string. Try format: T6N R30E S12")
+        if st.session_state.search_result:
+            sr = st.session_state.search_result
+            st.success(f"Location: {sr['label']}  ({sr['lat']:.6f}, {sr['lon']:.6f})")
+            if st.button("Clear search", key="btn_clear_search"):
+                st.session_state.search_result = None
+                st.rerun()
+
+    # ââ STEP 1: The Map ââ
     st.markdown("**Step 1:** Use the polygon or rectangle tool to draw an area on the map.")
 
     # Base map selector (replaces Leaflet LayerControl which crashes on rerun)
@@ -980,7 +1102,21 @@ if st.session_state.page == "draw":
     }
     tile_url, tile_attr = tile_options[base_map]
 
-    m = folium.Map(location=[39.5, -98.35], zoom_start=5, tiles=tile_url, attr=tile_attr)
+    _sr = st.session_state.search_result
+    if _sr:
+        _map_center = [_sr["lat"], _sr["lon"]]
+        _map_zoom = 14
+    else:
+        _map_center = [39.5, -98.35]
+        _map_zoom = 5
+    m = folium.Map(location=_map_center, zoom_start=_map_zoom, tiles=tile_url, attr=tile_attr)
+    if _sr:
+        folium.Marker(location=[_sr["lat"], _sr["lon"]], popup=_sr.get("label", "Search Result"), icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
+        if _sr.get("type") == "trs" and _sr.get("polygon"):
+            folium.Polygon(locations=_sr["polygon"], color="yellow", weight=2, fill=False, dash_array="8", popup=_sr.get("label", "")).add_to(m)
+            lats = [p[0] for p in _sr["polygon"]]
+            lons = [p[1] for p in _sr["polygon"]]
+            m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
 
     # Show saved features
     if st.session_state.features:
@@ -1028,7 +1164,7 @@ if st.session_state.page == "draw":
             if coords:
                 st.session_state.pending_drawing = drawing
 
-    # ── STEP 2: Attributes ──
+    # ââ STEP 2: Attributes ââ
     st.divider()
     pending = st.session_state.pending_drawing
     if pending:
@@ -1038,7 +1174,7 @@ if st.session_state.page == "draw":
         except Exception:
             area_preview = 0.0
 
-        st.markdown(f"**Step 2:** Shape captured! **{area_preview:,.2f} acres** — fill in details below.")
+        st.markdown(f"**Step 2:** Shape captured! **{area_preview:,.2f} acres** â fill in details below.")
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1078,7 +1214,7 @@ if st.session_state.page == "draw":
                     }
                     st.session_state.features.append(feature)
                     st.session_state.pending_drawing = None
-                    st.success(f"Saved '{name.strip()}' — {area_acres:,.2f} acres!")
+                    st.success(f"Saved '{name.strip()}' â {area_acres:,.2f} acres!")
                     st.rerun()
         with col_discard:
             if st.button("Discard Drawing", use_container_width=True):
@@ -1090,19 +1226,19 @@ if st.session_state.page == "draw":
     # Legend
     st.divider()
     st.markdown(
-        '<span style="color:#228B22">■</span> Forestry &nbsp;&nbsp;'
-        '<span style="color:#DAA520">■</span> Agriculture &nbsp;&nbsp;'
-        '<span style="color:#4682B4">■</span> Environmental &nbsp;&nbsp;'
-        '<span style="color:#808080">■</span> Other',
+        '<span style="color:#228B22">â </span> Forestry &nbsp;&nbsp;'
+        '<span style="color:#DAA520">â </span> Agriculture &nbsp;&nbsp;'
+        '<span style="color:#4682B4">â </span> Environmental &nbsp;&nbsp;'
+        '<span style="color:#808080">â </span> Other',
         unsafe_allow_html=True,
     )
 
 
-# ══════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # PAGE: View / Edit Data
-# ══════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 elif st.session_state.page == "list":
-    st.title("📋 Treatment Areas")
+    st.title("ð Treatment Areas")
 
     if not st.session_state.features:
         st.info("No treatment areas yet. Go to **Draw on Map** to create some, or import a shapefile.")
@@ -1110,7 +1246,7 @@ elif st.session_state.page == "list":
         for i, feat in enumerate(st.session_state.features):
             props = feat.get("properties", {})
             label = (
-                f"**{props.get('name', f'Feature {i+1}')}** — "
+                f"**{props.get('name', f'Feature {i+1}')}** â "
                 f"{props.get('category', '')} | {props.get('treatment_type', '')} | "
                 f"{props.get('area_acres', 0):,.2f} ac"
             )
@@ -1158,11 +1294,11 @@ elif st.session_state.page == "list":
                         st.rerun()
 
 
-# ══════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # PAGE: Export
-# ══════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 elif st.session_state.page == "export":
-    st.title("📤 Export Treatment Areas")
+    st.title("ð¤ Export Treatment Areas")
 
     if not st.session_state.features:
         st.info("No treatment areas to export. Draw on the map or import data first.")
@@ -1172,7 +1308,7 @@ elif st.session_state.page == "export":
         with col_opts:
             export_name = st.text_input("Filename", value="treatment_areas", key="export_name")
             export_crs = st.selectbox("Coordinate Reference System", [
-                "EPSG:4326 (WGS 84 — Lat/Lon)",
+                "EPSG:4326 (WGS 84 â Lat/Lon)",
                 "EPSG:5070 (NAD83 Conus Albers)",
                 "EPSG:3857 (Web Mercator)",
                 "EPSG:26910 (UTM Zone 10N)",
@@ -1183,7 +1319,7 @@ elif st.session_state.page == "export":
             crs_code = export_crs.split(" ")[0]
 
             export_format = st.selectbox("Format", [
-                "Shapefile (.shp — zipped)",
+                "Shapefile (.shp â zipped)",
                 "GeoJSON (.geojson)",
                 "KML (.kml)",
                 "KMZ (.kmz)",
@@ -1209,7 +1345,7 @@ elif st.session_state.page == "export":
             else:
                 gdf_export = gdf.copy()
 
-            st.caption(f"**Preview** — {len(gdf_export)} features")
+            st.caption(f"**Preview** â {len(gdf_export)} features")
             if len(gdf_export) > 0:
                 preview_df = gdf_export.drop(columns=["geometry"]).copy()
                 st.dataframe(preview_df, use_container_width=True, height=300)
@@ -1266,4 +1402,4 @@ elif st.session_state.page == "export":
 
 # Footer
 st.divider()
-st.caption("Valley Air Map Builder 2.0 • Built with Streamlit, Folium & GeoPandas")
+st.caption("Valley Air Map Builder 2.0 â¢ Built with Streamlit, Folium & GeoPandas")
