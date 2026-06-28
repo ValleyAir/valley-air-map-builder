@@ -455,8 +455,8 @@ def export_job(gdf, filename="treatment_areas", job_num="900"):
         idx = counter["i"]
         lines.append(f".POL {idx} Poly{idx}")
         lines.append("\t" + kind)
-        for x, y in pts:
-            lines.append(f"\t{y:.6f} {x:.6f}")
+        for pt in pts:
+            lines.append(f"\t{pt[1]:.6f} {pt[0]:.6f}")
 
     for geom in gdf_wgs.geometry:
         if geom is None or geom.is_empty:
